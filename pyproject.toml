@@ -1,0 +1,64 @@
+[build-system]
+requires = ["hatchling>=1.21"]
+build-backend = "hatchling.build"
+
+[project]
+name = "thermosim"
+version = "0.1.0"
+description = "A simulation and data-driven thermal analysis framework."
+authors = [
+    { name = "Christian Düreth", email = "christian@tu-dresden.de" }
+]
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "matplotlib>=3.8",
+    "pandas>=2.1",
+]
+
+# Optional feature groups — activate via:
+# pip install thermosim[ml,viz]
+[project.optional-dependencies]
+ml = [
+    "torch>=2.2",
+    "scikit-learn>=1.4",
+]
+
+viz = [
+    "plotly>=5.20",
+    "pyvista>=0.43",
+    "vtk>=9.3",
+]
+
+io = [
+    "h5py>=3.11",
+    "pyyaml>=6.0",
+]
+
+dev = [
+    "black",
+    "ruff",
+    "pytest",
+    "jupyterlab",
+]
+
+[project.urls]
+Homepage = "https://gitlab.hrz.tu-chemnitz.de/dchristi--tu-dresden.de/ThermoSim"
+Issues = "https://gitlab.hrz.tu-chemnitz.de/dchristi--tu-dresden.de/ThermoSim/-/issues"
+
+[tool.hatch.build]
+packages = ["thermosim"]
+
+# Format & lint configuration
+[tool.black]
+line-length = 100
+target-version = ['py311']
+
+[tool.ruff]
+line-length = 100
+select = ["E", "F", "B"]
+ignore = ["E501"]
