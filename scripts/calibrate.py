@@ -130,12 +130,12 @@ def detect_corners_binary(img, pattern_size):
     # bw = thermal_to_binary(img, method="otsu")
 
     flags = cv2.CALIB_CB_EXHAUSTIVE | cv2.CALIB_CB_ACCURACY
-    ok, corners = cv2.findChessboardCornersSB(img, pattern_size, flags)
+    ok, corners = cv2.findChessboardCornersSB(img, pattern_size, flags) # type: ignore
 
     if not ok:
         # try inverted binary
         bw_inv = cv2.bitwise_not(img)
-        ok, corners = cv2.findChessboardCornersSB(bw_inv, pattern_size, flags)
+        ok, corners = cv2.findChessboardCornersSB(bw_inv, pattern_size, flags) # type: ignore
 
     return corners if ok else None, img
 
@@ -146,15 +146,15 @@ def main(file_path):
     with h5py.File(file_path, "r") as f:
 
         dset = f["thermogram"]
-        n_frames = dset.shape[0]
-        img_size = dset.shape[-2:]
+        n_frames = dset.shape[0] # type: ignore
+        img_size = dset.shape[-2:] # type: ignore
         print(f"Found {n_frames} frames")
         
         objpoints = []  # 3D points in real world space
         imgpoints = []  # 2D points in image plane
         for i in range(n_frames):
 
-            img = dset[i]   # no need for [:, :]
+            img = dset[i]   # type: ignore # no need for [:, :]
 
             edges = edges_from_float(img)
 
@@ -163,11 +163,11 @@ def main(file_path):
             print(x0, y0, w, h)
 
             # Estimate background (large blur kernel)
-            bg = cv2.GaussianBlur(img_cropped, (0, 0), 25)
+            bg = cv2.GaussianBlur(img_cropped, (0, 0), 25, 25) # type: ignore
 
             # Flat-field correction
             corrected = img_cropped / (bg + 1e-6)
-            corrected = cv2.normalize(corrected, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+            corrected = cv2.normalize(corrected, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8) # type: ignore
             
 
             print(corrected.dtype,corrected.min(),corrected.max())
@@ -215,9 +215,16 @@ def main(file_path):
         raise RuntimeError(f"Too few valid detections: {len(objpoints)} (need ~10+)")
 
     # Calibrate
+    K0 = np.eye(3, dtype=np.float64)
+    dist0 = np.zeros((5, 1), dtype=np.float64)
+
     ret, K, dist, rvecs, tvecs = cv2.calibrateCamera(
-        objpoints, imgpoints, img_size, None, None
-    )
+        objpoints,
+        imgpoints,
+        img_size,
+        K0,
+        dist0
+    )   
 
     # Reprojection error (quality metric)
     mean_err = 0.0
