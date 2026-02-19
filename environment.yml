@@ -1,0 +1,38 @@
+name: thermosim
+channels:
+  - conda-forge
+dependencies:
+  # Core
+  - python=3.10
+  - pip
+  - numpy
+  - scipy
+  - matplotlib
+  - h5py
+  - meshio
+
+  # Optional scientific stack
+  - pandas
+  - tqdm
+  - petsc4py
+  - fenics-basix
+  - pyfiglet
+
+  # Pip installs (JAX + jax-fem)
+  - pip:
+      # Choose ONE of the following JAX lines
+
+      # CPU only
+      - jax[cpu]
+
+      # CUDA 12 (Linux GPU)
+      # - jax[cuda12_pip] -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+
+      # FEM
+      - jax-fem
+      - gmsh
+      - basix
+      # ML / Optimization (optional)
+      - optax
+      - flax
+      - equinox
