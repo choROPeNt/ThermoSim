@@ -59,3 +59,8 @@ where $k_1$, $k_2$, and $k_3$ represent **radial distortion**, and $p_1$ and $p_
 Radial distortion corrects barrel and pincushion effects, while tangential distortion accounts for lens misalignment.
 
 These parameters are estimated jointly during calibration and are used for image undistortion and metric measurements.
+
+
+## ToDos
+
+- 
