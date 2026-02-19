@@ -198,17 +198,24 @@ def main(file_path):
 
             if corners is not None:
 
-                pattern_size = (7,4)
-                square_size = 10.0
-                
+                pattern_size = (7, 4)
+                square_size = 5.0
+
                 # prepare object points: (0..cols-1, 0..rows-1) * square_size
                 cols, rows = pattern_size
+
                 objp = np.zeros((rows * cols, 3), np.float32)
                 objp[:, :2] = np.mgrid[0:cols, 0:rows].T.reshape(-1, 2)
                 objp *= float(square_size)
 
+                # --- Apply offset to image points ---
+                corners_full = corners.copy()
+
+                corners_full[:, 0, 0] += x0   # shift x
+                corners_full[:, 0, 1] += y0   # shift y
+
                 objpoints.append(objp)
-                imgpoints.append(corners)
+                imgpoints.append(corners_full)
 
 
     if len(objpoints) < 5:
