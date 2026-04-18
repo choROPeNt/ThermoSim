@@ -50,8 +50,8 @@ dev = [
 Homepage = "https://gitlab.hrz.tu-chemnitz.de/dchristi--tu-dresden.de/ThermoSim"
 Issues = "https://gitlab.hrz.tu-chemnitz.de/dchristi--tu-dresden.de/ThermoSim/-/issues"
 
-[tool.hatch.build]
-packages = ["thermosim"]
+[tool.hatch.build.targets.wheel]
+packages = ["src/thermosim"]
 
 # Format & lint configuration
 [tool.black]
