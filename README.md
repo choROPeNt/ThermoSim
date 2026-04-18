@@ -1,66 +1,42 @@
 # ThermoSim
 
+<p align="center">
+  <img src="docs/assets/logo.png" width="150">
+</p>
 
 
-## Miniconda
+<div align="center">
+
+[![GitHub](https://img.shields.io/badge/GitHub-ThermoSim-181717?logo=github&logoColor=white)](https://github.com/choROPeNt/ThermoSim)&nbsp;
+[![Docs](https://img.shields.io/badge/Docs-passed-4CAF50?logo=readthedocs&logoColor=white)](https://choROPeNt.github.io/ThermoSim/)
+[![Datasets](https://img.shields.io/badge/Zenodo-coming-1682D4?logo=zenodo&logoColor=white)]()&nbsp;
 
 
+</div>
+
+## Getting Started
+
+[Conda](https://docs.conda.io/en/latest/) is recommended for managing the environment.
+
+**1. Create the environment**
+
+```bash
+conda env create -f environment.yml
+```
+
+**2. Activate the environment**
 
 ```bash
 source ~/miniconda3/bin/activate
-```
-
-```bash
 conda activate thermosim
 ```
 
+**3. Update an existing environment**
+
+```bash
+conda env update -f environment.yml --prune
+```
 
 
-
-## Camera Calibration
-
-The goal of camera calibration is to estimate the **intrinsic**, **extrinsic**, and **distortion** parameters of the camera, which describe how 3D points are projected onto the image sensor.
-
-### Intrinsic Parameters
-
-The intrinsic parameters are summarized in the camera matrix:
-
-$$
-K =
-\begin{bmatrix}
-f_x & 0   & c_x \\
-0   & f_y & c_y \\
-0   & 0   & 1
-\end{bmatrix}
-$$
-
-where $f_x$ and $f_y$ are the focal lengths in pixel units, and $(c_x, c_y)$ is the principal point (optical center).
-
-### Extrinsic Parameters
-
-The extrinsic parameters describe the position and orientation of the camera with respect to the world coordinate system and are given by a rotation matrix $R$ and a translation vector $t$:
-
-$$
-X_c = R X_w + t
-$$
-
-where $X_w$ are 3D points in the world frame and $X_c$ are the corresponding coordinates in the camera frame.
-
-### Distortion Parameters
-
-Real lenses introduce geometric distortions that deviate from the ideal pinhole model. These effects are modeled using distortion coefficients:
-
-$$
-\mathbf{d} = (k_1, k_2, p_1, p_2, k_3)
-$$
-
-where $k_1$, $k_2$, and $k_3$ represent **radial distortion**, and $p_1$ and $p_2$ represent **tangential distortion**.
-
-Radial distortion corrects barrel and pincushion effects, while tangential distortion accounts for lens misalignment.
-
-These parameters are estimated jointly during calibration and are used for image undistortion and metric measurements.
-
-
-## ToDos
 
 - 
