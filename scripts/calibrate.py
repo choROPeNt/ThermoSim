@@ -166,9 +166,9 @@ def main(file_path):
 
     with h5py.File(file_path, "r") as f:
 
-        dset = f["thermogram"]
-        n_frames = dset.shape[0] # type: ignore
-        img_size = dset.shape[-2:] # type: ignore
+        dset: h5py.Dataset = f["thermogram"]  # type: ignore[assignment]
+        n_frames = dset.shape[0]
+        img_size = (dset.shape[-1], dset.shape[-2])  # (W, H) as required by cv2
         print(f"Found {n_frames} frames")
         
         objpoints = []  # 3D points in real world space
@@ -259,7 +259,8 @@ def main(file_path):
         raise RuntimeError(f"Too few valid detections: {len(objpoints)} (need ~10+)")
 
     # Calibrate
-    K0 = np.eye(3, dtype=np.float64)
+    W, H = img_size
+    K0 = np.array([[max(W,H), 0, W/2], [0, max(W,H), H/2], [0, 0, 1]], dtype=np.float64)
     dist0 = np.zeros((5, 1), dtype=np.float64)
 
     ret, K, dist, rvecs, tvecs = cv2.calibrateCamera(
