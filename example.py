@@ -1,51 +1,136 @@
-import jax
-import jax.numpy as np
+"""
+Transient heat conduction using FEniCSx (DOLFINx).
+
+Solves:  rho*cp * dT/dt - div( K · grad(T) ) = Q   on [0,Lx] x [0,Ly]
+
+Boundary conditions:
+  left  : T = T_hot   (heat source side)
+  right : T = T_cold  (heat sink side)
+  top / bottom : insulated (natural BC — zero flux)
+
+Initial condition: T = T_cold everywhere
+
+Material: anisotropic GFRP
+  k_x = conductivity along fibers  (x-direction)
+  k_y = conductivity transverse
+
+Heat source Q: Gaussian hot spot at centre (e.g. embedded resistor)
+Time discretisation: backward Euler (theta = 1).
+Output: XDMF (open with ParaView).
+"""
+
+import gc
 import os
+import numpy as np
+from mpi4py import MPI
 
-from jax_fem.problem import Problem
-from jax_fem.solver import solver
-from jax_fem.utils import save_sol
-from jax_fem.generate_mesh import get_meshio_cell_type, Mesh, rectangle_mesh
+from dolfinx import fem, io, mesh as dmesh
+from dolfinx.fem.petsc import LinearProblem
+import ufl
 
-class Poisson(Problem):
-    def get_tensor_map(self):
-        return lambda x: x
+# ── Parameters ────────────────────────────────────────────────────────────────
+nx, ny  = 64, 64      # mesh resolution
 
-    def get_mass_map(self):
-        def mass_map(u, x):
-            val = -np.array([10*np.exp(-(np.power(x[0] - 0.5, 2) + np.power(x[1] - 0.5, 2)) / 0.02)])
-            return val
-        return mass_map
+# material — GFRP (anisotropic)
+k_x    = 1.0          # along-fiber conductivity   [W/(m·K)]
+k_y    = 0.35         # transverse conductivity     [W/(m·K)]
+rho    = 1850.0       # density                     [kg/m³]
+cp     = 1200.0       # specific heat               [J/(kg·K)]
 
-ele_type = 'QUAD4'
-cell_type = get_meshio_cell_type(ele_type)
-Lx, Ly = 1., 1.
-meshio_mesh = rectangle_mesh(Nx=128, Ny=128, domain_x=Lx, domain_y=Ly)
-mesh = Mesh(meshio_mesh.points, meshio_mesh.cells_dict[cell_type])
+# geometry
+Lx, Ly = 1.0, 1.0    # plate dimensions [m]
 
-def left(point):
-    return np.isclose(point[0], 0., atol=1e-5)
+# temperatures
+T_hot  = 100.0        # left edge   [°C]
+T_cold =  20.0        # right edge  [°C]
 
-def right(point):
-    return np.isclose(point[0], Lx, atol=1e-5)
+# heat source — Gaussian hot spot at centre
+Q_peak = 5000.0       # peak heat generation  [W/m³]
+sigma  = 0.05         # spot radius           [m]
 
-def bottom(point):
-    return np.isclose(point[1], 0., atol=1e-5)
+# time
+t_end  = 3600.0       # end time   [s]
+dt     = 60.0         # time step  [s]
+theta  = 1.0          # 1 = backward Euler, 0.5 = Crank-Nicolson
 
-def top(point):
-    return np.isclose(point[1], Ly, atol=1e-5)
+output_file = "results/temperature_transient.xdmf"
 
-def dirichlet_val(point):
-    return 0.
 
-location_fns = [left, right, bottom, top]
-value_fns = [dirichlet_val]*4
-vecs = [0]*4
-dirichlet_bc_info = [location_fns, vecs, value_fns]
+def run():
+    # ── Mesh & function space ─────────────────────────────────────────────────
+    msh = dmesh.create_rectangle(
+        MPI.COMM_WORLD,
+        [[0.0, 0.0], [Lx, Ly]],
+        [nx, ny],
+        cell_type=dmesh.CellType.quadrilateral,
+    )
+    V = fem.functionspace(msh, ("Lagrange", 1))
 
-problem = Poisson(mesh=mesh, vec=1, dim=2, ele_type=ele_type, dirichlet_bc_info=dirichlet_bc_info)
-sol = solver(problem)
+    # ── Boundary conditions ───────────────────────────────────────────────────
+    bc_left = fem.dirichletbc(
+        T_hot,
+        fem.locate_dofs_geometrical(V, lambda x: np.isclose(x[0], 0.0)),
+        V,
+    )
+    bc_right = fem.dirichletbc(
+        T_cold,
+        fem.locate_dofs_geometrical(V, lambda x: np.isclose(x[0], Lx)),
+        V,
+    )
 
-data_dir = os.path.join(os.path.dirname(__file__), 'data')
-vtk_path = os.path.join(data_dir, f'vtk/u.vtu')
-save_sol(problem.fes[0], sol[0], vtk_path)
+    # ── Anisotropic conductivity tensor ───────────────────────────────────────
+    K = ufl.as_tensor([[k_x, 0.0],
+                       [0.0, k_y]])
+
+    # ── Heat source — Gaussian hot spot ───────────────────────────────────────
+    x  = ufl.SpatialCoordinate(msh)
+    r2 = (x[0] - 0.5 * Lx)**2 + (x[1] - 0.5 * Ly)**2
+    Q  = Q_peak * ufl.exp(-r2 / (2 * sigma**2))
+
+    # ── Initial condition ─────────────────────────────────────────────────────
+    T_n = fem.Function(V, name="T")   # solution at previous step
+    T_n.x.array[:] = T_cold
+
+    # ── Variational form (theta-method) ───────────────────────────────────────
+    T_trial = ufl.TrialFunction(V)
+    v       = ufl.TestFunction(V)
+    T_theta = theta * T_trial + (1.0 - theta) * T_n
+
+    a = (
+        rho * cp * T_trial * v * ufl.dx
+        + dt * ufl.dot(K * ufl.grad(T_theta), ufl.grad(v)) * ufl.dx
+    )
+    L = (
+        rho * cp * T_n * v * ufl.dx
+        + dt * Q * v * ufl.dx
+    )
+
+    problem = LinearProblem(a, L, bcs=[bc_left, bc_right],
+                            petsc_options={"ksp_type": "cg", "pc_type": "ilu"},
+                            petsc_options_prefix="transient_heat_")
+
+    print(f"  Material : GFRP  k_x={k_x} W/(m·K)  k_y={k_y} W/(m·K)  "
+          f"rho={rho} kg/m³  cp={cp} J/(kg·K)")
+    print(f"  Anisotropy ratio k_x/k_y : {k_x/k_y:.1f}x")
+
+    # ── Time loop ─────────────────────────────────────────────────────────────
+    with io.XDMFFile(msh.comm, output_file, "w") as xdmf:
+        xdmf.write_mesh(msh)
+        xdmf.write_function(T_n, 0.0)
+
+        t = 0.0
+        while t < t_end - 1e-12:
+            t += dt
+            T_n.x.array[:] = problem.solve().x.array
+            xdmf.write_function(T_n, t)
+            print(f"  t = {t:.0f} s  T_max = {T_n.x.array.max():.2f} °C"
+                  f"  T_min = {T_n.x.array.min():.2f} °C"
+                  f"  T_mean = {T_n.x.array.mean():.2f} °C")
+
+    # PETSc objects destroyed here before MPI shuts down
+
+
+run()
+print(f"\nDone. Results written to {output_file}")
+gc.collect()
+os._exit(0)

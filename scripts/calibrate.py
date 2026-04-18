@@ -1,5 +1,6 @@
 
 
+import argparse
 import os
 from pathlib import Path
 
@@ -8,7 +9,7 @@ import cv2
 
 import matplotlib.pyplot as plt
 
-import h5py 
+import h5py
 
 
 
@@ -75,23 +76,43 @@ def plot_corners(
 
 
 
-def edges_from_float(T, p=(2, 98), blur_sigma=1.0,
+def flatfield(T, bg_sigma=25):
+    """
+    Flat-field correction on a float thermogram.
+    Divides by a heavily blurred background to remove
+    slow temperature gradients and boost local contrast.
+
+    T        : 2D float32 thermogram
+    bg_sigma : Gaussian sigma for background estimate (large = slow trend only)
+    returns  : corrected uint8 image [0, 255]
+    """
+    T = np.asarray(T, dtype=np.float32)
+    bg = cv2.GaussianBlur(T, (0, 0), bg_sigma)
+    corrected = T / (bg + 1e-6)
+    lo, hi = corrected.min(), corrected.max()
+    return ((corrected - lo) / (hi - lo + 1e-12) * 255).astype(np.uint8)
+
+
+def edges_from_float(T, p=(2, 98), median_ksize=5, blur_sigma=1.0,
                      canny_low=15, canny_high=150):
     """
-    T : 2D float image (thermogram)
-    returns: uint8 image, edges (uint8 0/255)
-    """
+    T : 2D float or uint8 image (already flat-field corrected or raw)
+    returns: edges (uint8 0/255)
 
+    median_ksize : kernel size for median filter — removes isolated hot/cold
+                   spots before Canny without blurring checkerboard edges
+    """
     T = np.asarray(T, dtype=np.float32)
 
     # 1) Robust normalization (ignore outliers)
     lo, hi = np.percentile(T[np.isfinite(T)], p)
-    Tn = np.clip((T - lo) / (hi - lo + 1e-12), 0, 1)
+    img_u8 = np.clip((T - lo) / (hi - lo + 1e-12) * 255, 0, 255).astype(np.uint8)
 
-    # 2) Convert to uint8 for OpenCV
-    img_u8 = (255 * Tn).astype(np.uint8)
+    # 2) Median filter — kills isolated spots
+    if median_ksize > 1:
+        img_u8 = cv2.medianBlur(img_u8, median_ksize)
 
-    # 3) Small blur (stabilizes Canny on thermal noise)
+    # 3) Small Gaussian blur (stabilizes Canny on residual noise)
     if blur_sigma > 0:
         img_u8 = cv2.GaussianBlur(img_u8, (0, 0), blur_sigma)
 
@@ -154,23 +175,21 @@ def main(file_path):
         imgpoints = []  # 2D points in image plane
         for i in range(n_frames):
 
-            img = dset[i]   # type: ignore # no need for [:, :]
+            img = dset[i]   # type: ignore
 
-            edges = edges_from_float(img)
+            # flat-field on full image first — removes background gradient
+            # and suppresses spots before edge detection
+            ff = flatfield(img)
 
-            img_cropped,(x0, y0, w, h)= crop_to_edges(img,edges)
+            edges = edges_from_float(ff)
+
+            img_cropped, (x0, y0, w, h) = crop_to_edges(img, edges)
+            ff_cropped,  _              = crop_to_edges(ff,  edges)
 
             print(x0, y0, w, h)
 
-            # Estimate background (large blur kernel)
-            bg = cv2.GaussianBlur(img_cropped, (0, 0), 25, 25) # type: ignore
-
-            # Flat-field correction
-            corrected = img_cropped / (bg + 1e-6)
-            corrected = cv2.normalize(corrected, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8) # type: ignore
-            
-
-            print(corrected.dtype,corrected.min(),corrected.max())
+            # Otsu threshold on the already-corrected cropped region
+            corrected = ff_cropped
 
             _, binary = cv2.threshold(
                 corrected, 0, 255,  cv2.THRESH_OTSU
@@ -182,17 +201,35 @@ def main(file_path):
 
             corners, _ = detect_corners_binary(binary, pattern_size=(7, 4))
 
+            # ── Per-frame diagnostic figure ───────────────────────────────────
+            fig, axes = plt.subplots(2, 3, figsize=(14, 8))
+            fig.suptitle(f"Frame {i}  —  corners {'FOUND' if corners is not None else 'NOT FOUND'}", fontsize=13)
 
+            def _show(ax, data, title, cmap="inferno"):
+                ax.imshow(data, cmap=cmap)
+                ax.set_title(title)
+                ax.axis("off")
 
-            plot_corners(
-                img,
-                corners,
-                offset=(x0, y0),
-                color="cyan",
-                marker="x",
-                size=60,
-                show_idx=True
-            )
+            _show(axes[0, 0], img,         "1 · Original thermogram")
+            _show(axes[0, 1], ff,          "2 · Flat-field (full)",   cmap="gray")
+            _show(axes[0, 2], edges,       "3 · Canny edges (on ff)", cmap="gray")
+            _show(axes[1, 0], img_cropped, "4 · Cropped (original)")
+            _show(axes[1, 1], corrected,   "5 · Cropped flat-field",  cmap="gray")
+            _show(axes[1, 2], binary,      "6 · Otsu binary",         cmap="gray")
+
+            # overlay detected corners on panel 6 — colored by index
+            # so the ordering/pattern of the checkerboard is visible
+            if corners is not None:
+                c = corners[:, 0, :]
+                colors = plt.get_cmap("rainbow")(np.linspace(0, 1, len(c)))
+                axes[1, 2].scatter(c[:, 0], c[:, 1],
+                                   color=colors, marker="o", s=60, zorder=5)
+                for j, (cx, cy) in enumerate(c):
+                    axes[1, 2].text(cx + 3, cy - 3, str(j),
+                                    color=colors[j], fontsize=6)
+
+            plt.tight_layout()
+            plt.show()
 
             
 
@@ -230,7 +267,9 @@ def main(file_path):
         imgpoints,
         img_size,
         K0,
-        dist0
+        dist0,
+            flags=cv2.CALIB_FIX_K3
+
     )   
 
     # Reprojection error (quality metric)
@@ -252,10 +291,26 @@ def main(file_path):
         f"Number of views      : {len(rvecs)}\n"
     )
 
+    return ret, K, dist, img_size
+
 
 
 if __name__ == "__main__":
-    file_path = Path("data/Wölbungskorrektur Messung 3.h5")
-    
-    
-    main(file_path)
+    parser = argparse.ArgumentParser(description="IR camera calibration from H5 thermogram file")
+    parser.add_argument("input", type=Path, help="Path to the .h5 input file")
+    parser.add_argument("--output", type=Path, default=None,
+                        help="Path for the output .npz calibration file (default: <input>.calib.npz)")
+    args = parser.parse_args()
+
+    out_path = args.output or args.input.with_suffix(".calib.npz")
+
+    ret, K, dist, img_size = main(args.input)
+
+    np.savez(
+        out_path,
+        K=K,
+        dist=dist,
+        img_size=np.array(img_size),
+        rms=np.array(ret),
+    )
+    print(f"Calibration saved to {out_path}")
