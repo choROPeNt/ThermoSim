@@ -12,6 +12,9 @@ predict/
 results/
 .vscode/
 
+mesh/
+geometries/
+
 ## Labelbox ap key
 api_key.txt
 
